@@ -22,7 +22,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
-        libgit2-1.7 \
+        libgit2-1.5 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/skynet /app/skynet
