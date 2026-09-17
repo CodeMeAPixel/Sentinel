@@ -2,6 +2,8 @@ FROM rust:1.82-bookworm AS builder
 
 WORKDIR /app
 
+ENV CARGO_BUILD_JOBS=1
+
 COPY . .
 
 RUN apt-get update \
@@ -12,7 +14,7 @@ RUN apt-get update \
         clang \
         cmake \
         make \
-    && cargo build --release
+    && cargo build --release --jobs 1
 
 FROM debian:bookworm-slim
 
