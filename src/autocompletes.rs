@@ -20,9 +20,18 @@ pub async fn limits_autocomplete<'a>(
     if let Ok(limits) = limits {
         let mut choices = Vec::new();
 
+        let partial = partial.to_ascii_lowercase();
+
         for limit in limits {
-            if limit.limit_name.starts_with(partial) {
-                choices.push(serenity::all::AutocompleteChoice::new(limit.limit_name, limit.limit_id));
+            if limit.limit_name.to_ascii_lowercase().contains(&partial) {
+                choices.push(serenity::all::AutocompleteChoice::new(
+                    limit.limit_name,
+                    limit.limit_id,
+                ));
+
+                if choices.len() == 25 {
+                    break;
+                }
             }
         }
 

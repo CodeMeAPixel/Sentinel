@@ -5,18 +5,18 @@ enum Status {
     Watch,
     Play,
     Listen,
+    Custom
 }
 
 pub async fn update_status(
     ctx: &serenity::all::Context,
 ) -> Result<(), crate::Error> {
     let statuses = [
-        (Status::Watch, "sky!help"),
-        (Status::Play, "stopping raids"),
-        (Status::Listen, "to your commands"),
+        (Status::Custom, "/help"),
+        (Status::Custom, "stopping raids"),
+        (Status::Custom, "listening to audits"),
     ];
 
-    // Get random status
     let (status, text) = statuses.choose(&mut rand::thread_rng()).unwrap();
 
     let activity = match status {
