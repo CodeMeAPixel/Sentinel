@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.railway.app/railpack.json",
+  "build": {
+    "builder": "rust",
+    "buildCommand": "apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev libgit2-dev clang cmake make && cargo build --release",
+    "installCommand": "apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev libgit2-dev clang cmake make"
+  },
+  "deploy": {
+    "startCommand": "./target/release/skynet"
+  }
+}
