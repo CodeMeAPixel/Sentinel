@@ -10,7 +10,7 @@ env:
 
 jobs:
   build_and_test:
-    name: Skynet
+    name: Sentinel
     runs-on: ubuntu-latest
     defaults:
       run:

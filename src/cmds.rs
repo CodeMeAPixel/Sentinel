@@ -97,9 +97,59 @@ pub async fn remove_admin(ctx: Context<'_>, user: Member) -> Result<(), Error> {
     prefix_command,
     slash_command,
     guild_only,
-    subcommands("limits_add", "limits_view", "limits_remove", "hit_limits")
+    subcommands(
+        "limits_add",
+        "limits_view",
+        "limits_remove",
+        "limits_guide",
+        "hit_limits"
+    )
 )]
 pub async fn limits(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+/// Explain how moderation limits work
+#[poise::command(prefix_command, slash_command, guild_only, rename = "guide")]
+pub async fn limits_guide(ctx: Context<'_>) -> Result<(), Error> {
+    let embed = CreateEmbed::default()
+        .title("How Sentinel limits work")
+        .description(
+            "Limits watch moderation events and apply a response when a moderator reaches a threshold."
+        )
+        .field(
+            "Add a limit",
+            "Use `/limits add` and choose a name, event type, number of infractions, time window, and response.",
+            false,
+        )
+        .field(
+            "Event types",
+            "Role Create, Role Update, Role Remove, Channel Create, Channel Update, Channel Remove, Kick, Ban, and Unban.",
+            false,
+        )
+        .field(
+            "Threshold example",
+            "`3` bans in `10` minutes means the response runs when the same moderator reaches three bans during that window.",
+            false,
+        )
+        .field(
+            "Responses",
+            "Remove All Roles, Kick User, or Ban User.",
+            false,
+        )
+        .field(
+            "Manage limits",
+            "`/limits view` lists configured limits. Use `/limits remove` and select a limit from the suggestions.",
+            false,
+        )
+        .field(
+            "History",
+            "`/limits hit` shows triggered limits, while `/actions view` shows recorded moderation actions.",
+            false,
+        )
+        .color(0x00ff00);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 
@@ -281,7 +331,7 @@ pub async fn setup(ctx: Context<'_>) -> Result<(), Error> {
     .execute(&ctx.data().pool)
     .await?;
 
-    ctx.say("Setup successfully. Now you can add limits for SkyNet to monitor for")
+    ctx.say("Setup successfully. Now you can add limits for Sentinel to monitor for")
         .await?;
 
     Ok(())
@@ -293,7 +343,7 @@ pub async fn actions(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// View actions taken by users that have been recorded by SkyNet
+/// View actions taken by users that have been recorded by Sentinel
 #[poise::command(prefix_command, slash_command, guild_only, rename = "view")]
 pub async fn actions_view(
     ctx: Context<'_>,
