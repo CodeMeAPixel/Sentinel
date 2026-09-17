@@ -90,6 +90,27 @@ async fn event_listener<'a>(
 
             info!("{} is ready!", data_about_bot.user.name);
 
+            if let Err(error) = poise::builtins::register_globally(
+                &ctx.serenity_context.http,
+                &ctx.options().commands,
+            )
+            .await
+            {
+                error!("Could not register global application commands: {error}");
+            }
+
+            for guild_id in ctx.serenity_context.cache.guilds() {
+                if let Err(error) = poise::builtins::register_in_guild(
+                    &ctx.serenity_context.http,
+                    &ctx.options().commands,
+                    guild_id,
+                )
+                .await
+                {
+                    error!("Could not register application commands in guild {guild_id}: {error}");
+                }
+            }
+
             let cache_http_server = botox::cache::CacheHttpImpl::from_ctx(ctx.serenity_context);
 
             tokio::task::spawn(server::setup_server(
