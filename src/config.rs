@@ -29,8 +29,8 @@ impl Default for Config {
             proxy_url: String::new(),
             frontend_url: String::from("https://skynet.infinitybots.gg"),
             owners: vec![
-                UserId::new(728871946456137770),
                 UserId::new(510065483693817867),
+                UserId::new(896951964234043413),
             ],
         }
     }
@@ -97,7 +97,7 @@ impl Config {
             proxy_url,
             frontend_url,
             owners: vec![
-                UserId::new(728871946456137770),
+                UserId::new(896951964234043413),
                 UserId::new(510065483693817867),
             ],
             client_id,
