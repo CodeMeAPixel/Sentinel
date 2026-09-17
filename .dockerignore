@@ -1,0 +1,9 @@
+target
+.git
+.github
+.vscode
+.env
+config.yaml
+config.yaml.sample
+Dockerfile
+.gitignore

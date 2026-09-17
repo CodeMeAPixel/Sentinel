@@ -225,12 +225,18 @@ async fn main() {
 
     env_logger::init();
 
-    info!("Proxy URL: {}", config::CONFIG.proxy_url);
+    if !config::CONFIG.proxy_url.trim().is_empty() {
+        info!("Proxy URL: {}", config::CONFIG.proxy_url);
+    }
 
-    let http = serenity::all::HttpBuilder::new(&config::CONFIG.token)
-        .proxy(config::CONFIG.proxy_url.clone())
-        .ratelimiter_disabled(true)
-        .build();
+    let mut http = serenity::all::HttpBuilder::new(&config::CONFIG.token)
+        .ratelimiter_disabled(true);
+
+    if !config::CONFIG.proxy_url.trim().is_empty() {
+        http = http.proxy(config::CONFIG.proxy_url.clone());
+    }
+
+    let http = http.build();
 
     let client_builder = serenity::all::ClientBuilder::new_with_http(
         Arc::new(http),
