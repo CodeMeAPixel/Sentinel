@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use log::{error, info};
 use poise::serenity_prelude::{FullEvent, RoleAction, UserId};
-use serenity::model::guild::audit_log::{Action, ChannelAction};
+use serenity::model::guild::audit_log::{Action, ChannelAction, MemberAction};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
@@ -224,6 +224,26 @@ async fn event_listener<'a>(
                         _ => Ok(()),
                     }
                 }
+                Action::Member(member_action) => {
+                    let target_id = entry.target_id.ok_or("No member ID found")?;
+                    let (limit_type, label) = match member_action {
+                        MemberAction::Kick => (core::UserLimitTypes::Kick, "Member kicked"),
+                        MemberAction::BanAdd => (core::UserLimitTypes::Ban, "Member banned"),
+                        MemberAction::BanRemove => (core::UserLimitTypes::Unban, "Member unbanned"),
+                        _ => return Ok(()),
+                    };
+
+                    info!("{}: {}", label, target_id);
+                    handler::handle_mod_action(
+                        *guild_id,
+                        entry.user_id,
+                        &user_data.pool,
+                        ctx.serenity_context,
+                        limit_type,
+                        target_id.to_string(),
+                    )
+                    .await
+                }
                 _ => Ok(()),
             };
 
@@ -295,6 +315,7 @@ async fn main() {
                 cmds::ping(),
                 cmds::perms(),
                 cmds::setup(),
+                cmds::settings(),
                 cmds::limits(),
                 cmds::actions(),
                 owner::guild(),

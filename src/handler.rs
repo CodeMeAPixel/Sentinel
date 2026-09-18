@@ -1,5 +1,5 @@
 use log::{error, info, warn};
-use poise::serenity_prelude::{GuildId, UserId};
+use poise::serenity_prelude::{CreateEmbed, CreateMessage, GuildId, UserId};
 use sqlx::PgPool;
 
 use crate::{core, Error};
@@ -155,6 +155,29 @@ pub async fn handle_mod_action(
         }
 
         tx.commit().await?;
+    }
+
+    let settings = sqlx::query_as::<_, (Option<String>, bool, i32)>(
+        "SELECT logs_channel_id, logs_enabled, logs_color FROM guild_settings WHERE guild_id = $1",
+    )
+    .bind(guild_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some((Some(channel_id), true, color)) = settings {
+        if let Ok(channel_id) = channel_id.parse::<serenity::all::ChannelId>() {
+            let embed = CreateEmbed::default()
+                .title("Moderation audit event")
+                .description(format!("**{}** by <@{}> on `{}`", action.to_cond(), user_id, action_target))
+                .color(color.clamp(0, 0xFFFFFF) as u32);
+
+            if let Err(error) = channel_id
+                .send_message(ctx, CreateMessage::new().embed(embed))
+                .await
+            {
+                warn!("Could not send audit log message: {}", error);
+            }
+        }
     }
 
     Ok(())

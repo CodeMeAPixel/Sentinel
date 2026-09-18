@@ -2,7 +2,7 @@ use poise::{
     serenity_prelude::{CreateEmbed, Member},
     CreateReply,
 };
-use serenity::{all::UserId, builder::CreateAttachment, prelude::Mentionable};
+use serenity::{all::{ChannelId, UserId}, builder::CreateAttachment, prelude::Mentionable};
 
 use crate::{Context, Error};
 
@@ -52,8 +52,44 @@ pub async fn add_admin(ctx: Context<'_>, user: Member) -> Result<(), Error> {
     .execute(&ctx.data().pool)
     .await?;
 
+    sqlx::query("INSERT INTO guild_settings (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING")
+        .bind(ctx.guild_id().ok_or("Could not get guild id")?.to_string())
+        .execute(&ctx.data().pool)
+        .await?;
+
     ctx.say("Added admin successfully").await?;
 
+    Ok(())
+}
+
+#[poise::command(prefix_command, slash_command, guild_only)]
+pub async fn settings(
+    ctx: Context<'_>,
+    #[description = "Channel for audit notifications; omit to keep the current channel"]
+    logs_channel: Option<ChannelId>,
+    #[description = "Whether audit notifications are enabled"]
+    logs_enabled: Option<bool>,
+    #[description = "Embed color as hexadecimal (0xRRGGBB) or decimal"]
+    logs_color: Option<String>,
+) -> Result<(), Error> {
+    let guild_id = ctx.guild_id().ok_or("Could not get guild id")?.to_string();
+    let color = logs_color
+        .map(|value| {
+            u32::from_str_radix(value.trim_start_matches("0x"), 16)
+                .or_else(|_| value.parse::<u32>())
+                .map_err(|_| "logs_color must be hexadecimal (0xRRGGBB) or decimal")
+        })
+        .transpose()?;
+
+    sqlx::query("INSERT INTO guild_settings (guild_id, logs_channel_id, logs_enabled, logs_color) VALUES ($1, $2, COALESCE($3, TRUE), COALESCE($4, 65280)) ON CONFLICT (guild_id) DO UPDATE SET logs_channel_id = COALESCE($2, guild_settings.logs_channel_id), logs_enabled = COALESCE($3, guild_settings.logs_enabled), logs_color = COALESCE($4, guild_settings.logs_color)")
+        .bind(&guild_id)
+        .bind(logs_channel.map(|channel| channel.to_string()))
+        .bind(logs_enabled)
+        .bind(color.map(|value| value as i32))
+        .execute(&ctx.data().pool)
+        .await?;
+
+    ctx.say("Audit log settings updated.").await?;
     Ok(())
 }
 

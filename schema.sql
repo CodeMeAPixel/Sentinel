@@ -4,6 +4,13 @@ CREATE TABLE guilds (
     guild_id TEXT PRIMARY KEY
 );
 
+CREATE TABLE guild_settings (
+    guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    logs_channel_id TEXT,
+    logs_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    logs_color INTEGER NOT NULL DEFAULT 65280
+);
+
 CREATE TABLE guild_admins (
     guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE ON UPDATE CASCADE,
     user_id TEXT NOT NULL
