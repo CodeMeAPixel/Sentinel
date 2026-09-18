@@ -1,5 +1,5 @@
 use poise::{
-    serenity_prelude::{CreateEmbed, Member},
+    serenity_prelude::{CreateEmbed, Member, Role, User},
     CreateReply,
 };
 use serenity::{all::{ChannelId, UserId}, builder::CreateAttachment, prelude::Mentionable};
@@ -135,6 +135,7 @@ pub async fn remove_admin(ctx: Context<'_>, user: Member) -> Result<(), Error> {
     guild_only,
     subcommands(
         "limits_add",
+        "limits_edit",
         "limits_view",
         "limits_remove",
         "limits_guide",
@@ -160,7 +161,7 @@ pub async fn limits_guide(ctx: Context<'_>) -> Result<(), Error> {
         )
         .field(
             "Event types",
-            "Role Create, Role Update, Role Remove, Channel Create, Channel Update, Channel Remove, Kick, Ban, and Unban.",
+            "Role Create, Role Update, Role Remove, Channel Create, Channel Update, Channel Remove, Webhook Create, Webhook Remove, Emoji Create, Emoji Remove, Kick, Ban, and Unban.",
             false,
         )
         .field(
@@ -170,12 +171,17 @@ pub async fn limits_guide(ctx: Context<'_>) -> Result<(), Error> {
         )
         .field(
             "Responses",
-            "Remove All Roles, Kick User, or Ban User.",
+            "Remove All Roles, Kick User, Ban User, or Timeout User.",
             false,
         )
         .field(
             "Manage limits",
-            "`/limits view` lists configured limits. Use `/limits remove` and select a limit from the suggestions.",
+            "`/limits view` lists configured limits. `/limits edit` updates one in place. Use `/limits remove` and select a limit from the suggestions.",
+            false,
+        )
+        .field(
+            "Whitelist",
+            "`/whitelist add` exempts a trusted user or role from limit tracking entirely; `/whitelist view` and `/whitelist remove` manage it.",
             false,
         )
         .field(
@@ -205,9 +211,16 @@ pub async fn limits_add(
     limit_time_unit: crate::utils::Unit,
     #[description = "The action to take when the limit is hit"]
     limit_action: crate::core::UserLimitActionsChoices,
+    #[description = "Timeout duration, only used when action is Timeout User (default 1 hour)"]
+    timeout_duration: Option<i64>,
+    #[description = "The time unit for the timeout duration [seconds/minutes/hours/days]"]
+    timeout_duration_unit: Option<crate::utils::Unit>,
 ) -> Result<(), Error> {
     let limit_type = limit_type.resolve();
     let limit_action = limit_action.resolve();
+
+    let timeout_duration_secs = timeout_duration
+        .map(|value| value * timeout_duration_unit.unwrap_or(crate::utils::Unit::Seconds).to_seconds());
 
     // Add limit to db
     sqlx::query!(
@@ -218,15 +231,17 @@ pub async fn limits_add(
                 limit_type,
                 limit_action,
                 limit_per,
-                limit_time
+                limit_time,
+                limit_timeout_duration
             )
             VALUES (
-                $1, 
-                $2, 
-                $3, 
-                $4, 
+                $1,
+                $2,
+                $3,
+                $4,
                 $5,
-                make_interval(secs => $6)
+                make_interval(secs => $6),
+                CASE WHEN $7::double precision IS NULL THEN NULL ELSE make_interval(secs => $7) END
             )
         ",
         ctx.guild_id().ok_or("Could not get guild id")?.to_string(),
@@ -234,12 +249,87 @@ pub async fn limits_add(
         limit_type.to_string(),
         limit_action.to_string(),
         limit_per,
-        (limit_time * limit_time_unit.to_seconds()) as f64
+        (limit_time * limit_time_unit.to_seconds()) as f64,
+        timeout_duration_secs.map(|value| value as f64)
     )
     .execute(&ctx.data().pool)
     .await?;
 
     ctx.say("Added limit successfully").await?;
+
+    Ok(())
+}
+
+/// Edit an existing limit
+#[poise::command(prefix_command, slash_command, guild_only, rename = "edit")]
+pub async fn limits_edit(
+    ctx: Context<'_>,
+    #[description = "The limit id to edit"]
+    #[autocomplete = "crate::autocompletes::limits_autocomplete"]
+    limit_id: String,
+    #[description = "The new name of the limit"]
+    limit_name: Option<String>,
+    #[description = "The new type of limit to impose on moderators"]
+    limit_type: Option<crate::core::UserLimitTypesChoices>,
+    #[description = "The new amount of times the limit can be hit"]
+    limit_per: Option<i32>,
+    #[description = "The new time interval infractions are counted in"]
+    limit_time: Option<i64>,
+    #[description = "The time unit for the time interval [seconds/minutes/hours/days]"]
+    limit_time_unit: Option<crate::utils::Unit>,
+    #[description = "The new action to take when the limit is hit"]
+    limit_action: Option<crate::core::UserLimitActionsChoices>,
+    #[description = "New timeout duration, only used when action is Timeout User"]
+    timeout_duration: Option<i64>,
+    #[description = "The time unit for the timeout duration [seconds/minutes/hours/days]"]
+    timeout_duration_unit: Option<crate::utils::Unit>,
+) -> Result<(), Error> {
+    let guild_id = ctx.guild_id().ok_or("Could not get guild id")?.to_string();
+
+    let count = sqlx::query!(
+        "SELECT COUNT(*) FROM limits WHERE guild_id = $1 AND limit_id = $2",
+        guild_id,
+        limit_id
+    )
+    .fetch_one(&ctx.data().pool)
+    .await?;
+
+    if count.count.unwrap_or_default() == 0 {
+        return Err("Could not find limit".into());
+    }
+
+    let limit_time_secs = limit_time.map(|value| {
+        (value * limit_time_unit.unwrap_or(crate::utils::Unit::Seconds).to_seconds()) as f64
+    });
+    let timeout_duration_secs = timeout_duration.map(|value| {
+        (value * timeout_duration_unit.unwrap_or(crate::utils::Unit::Seconds).to_seconds()) as f64
+    });
+
+    sqlx::query!(
+        "
+            UPDATE limits SET
+                limit_name = COALESCE($3, limit_name),
+                limit_type = COALESCE($4, limit_type),
+                limit_action = COALESCE($5, limit_action),
+                limit_per = COALESCE($6, limit_per),
+                limit_time = CASE WHEN $7::double precision IS NULL THEN limit_time ELSE make_interval(secs => $7) END,
+                limit_timeout_duration = CASE WHEN $8::double precision IS NULL THEN limit_timeout_duration ELSE make_interval(secs => $8) END
+            WHERE guild_id = $1
+            AND limit_id = $2
+        ",
+        guild_id,
+        limit_id,
+        limit_name,
+        limit_type.map(|value| value.resolve().to_string()),
+        limit_action.map(|value| value.resolve().to_string()),
+        limit_per,
+        limit_time_secs,
+        timeout_duration_secs
+    )
+    .execute(&ctx.data().pool)
+    .await?;
+
+    ctx.say("Updated limit successfully").await?;
 
     Ok(())
 }
@@ -544,6 +634,112 @@ pub async fn hit_limits(
     }
 
     ctx.send(cr).await?;
+
+    Ok(())
+}
+/// Whitelist management: exempt trusted users or roles from limit tracking
+#[poise::command(
+    prefix_command,
+    slash_command,
+    guild_only,
+    subcommands("whitelist_add", "whitelist_remove", "whitelist_view")
+)]
+pub async fn whitelist(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+/// Add a user or role to the whitelist
+#[poise::command(prefix_command, slash_command, guild_only, rename = "add")]
+pub async fn whitelist_add(
+    ctx: Context<'_>,
+    #[description = "The user to exempt from limit tracking"] user: Option<User>,
+    #[description = "The role to exempt from limit tracking"] role: Option<Role>,
+) -> Result<(), Error> {
+    let (entity_id, entity_type) = match (user, role) {
+        (Some(user), None) => (user.id.to_string(), "user"),
+        (None, Some(role)) => (role.id.to_string(), "role"),
+        _ => return Err("Provide exactly one of `user` or `role`".into()),
+    };
+
+    let guild_id = ctx.guild_id().ok_or("Could not get guild id")?.to_string();
+
+    sqlx::query!(
+        "INSERT INTO guild_whitelist (guild_id, entity_id, entity_type) VALUES ($1, $2, $3) ON CONFLICT (guild_id, entity_id) DO NOTHING",
+        guild_id,
+        entity_id,
+        entity_type
+    )
+    .execute(&ctx.data().pool)
+    .await?;
+
+    ctx.say("Added to whitelist successfully").await?;
+
+    Ok(())
+}
+
+/// Remove a user or role from the whitelist
+#[poise::command(prefix_command, slash_command, guild_only, rename = "remove")]
+pub async fn whitelist_remove(
+    ctx: Context<'_>,
+    #[description = "The user to remove from the whitelist"] user: Option<User>,
+    #[description = "The role to remove from the whitelist"] role: Option<Role>,
+) -> Result<(), Error> {
+    let entity_id = match (user, role) {
+        (Some(user), None) => user.id.to_string(),
+        (None, Some(role)) => role.id.to_string(),
+        _ => return Err("Provide exactly one of `user` or `role`".into()),
+    };
+
+    let guild_id = ctx.guild_id().ok_or("Could not get guild id")?.to_string();
+
+    sqlx::query!(
+        "DELETE FROM guild_whitelist WHERE guild_id = $1 AND entity_id = $2",
+        guild_id,
+        entity_id
+    )
+    .execute(&ctx.data().pool)
+    .await?;
+
+    ctx.say("Removed from whitelist successfully").await?;
+
+    Ok(())
+}
+
+/// View the whitelist for this server
+#[poise::command(prefix_command, slash_command, guild_only, rename = "view")]
+pub async fn whitelist_view(ctx: Context<'_>) -> Result<(), Error> {
+    let guild_id = ctx.guild_id().ok_or("Could not get guild id")?.to_string();
+
+    let rec = sqlx::query!(
+        "SELECT entity_id, entity_type FROM guild_whitelist WHERE guild_id = $1",
+        guild_id
+    )
+    .fetch_all(&ctx.data().pool)
+    .await?;
+
+    if rec.is_empty() {
+        ctx.say("No users or roles are whitelisted for this server").await?;
+        return Ok(());
+    }
+
+    let mut description = String::new();
+
+    for entry in rec {
+        let mention = if entry.entity_type == "role" {
+            format!("<@&{}>", entry.entity_id)
+        } else {
+            format!("<@{}>", entry.entity_id)
+        };
+
+        description.push_str(&format!("- {} (``{}``)\n", mention, entry.entity_type));
+    }
+
+    let embed = CreateEmbed::default()
+        .title("Whitelisted users & roles")
+        .description(description)
+        .color(0x00ff00);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
 }

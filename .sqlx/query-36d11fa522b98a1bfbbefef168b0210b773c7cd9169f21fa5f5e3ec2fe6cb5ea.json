@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM guild_whitelist WHERE guild_id = $1 AND entity_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36d11fa522b98a1bfbbefef168b0210b773c7cd9169f21fa5f5e3ec2fe6cb5ea"
+}

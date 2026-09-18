@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO guild_whitelist (guild_id, entity_id, entity_type) VALUES ($1, $2, $3) ON CONFLICT (guild_id, entity_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3ebca1da89b278c77fd9b6be9b46c011cd9234f7f6160b044d0efb6229f1fa95"
+}

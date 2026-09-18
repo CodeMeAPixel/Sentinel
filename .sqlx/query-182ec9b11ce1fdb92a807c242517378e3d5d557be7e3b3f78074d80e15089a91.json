@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT limit_id, limit_name, limit_type, limit_action, limit_per, limit_time\n                FROM limits\n                WHERE guild_id = $1\n            ",
+  "query": "\n                SELECT limit_id, limit_name, limit_type, limit_action, limit_per, limit_time, limit_timeout_duration\n                FROM limits\n                WHERE guild_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "limit_time",
         "type_info": "Interval"
+      },
+      {
+        "ordinal": 6,
+        "name": "limit_timeout_duration",
+        "type_info": "Interval"
       }
     ],
     "parameters": {
@@ -45,8 +50,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "34f89926722878cad53438e6694588a39364410ceb06c3acf439f202ee500343"
+  "hash": "182ec9b11ce1fdb92a807c242517378e3d5d557be7e3b3f78074d80e15089a91"
 }

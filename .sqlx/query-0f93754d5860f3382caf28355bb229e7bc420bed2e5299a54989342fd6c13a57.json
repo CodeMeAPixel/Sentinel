@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE limits SET\n                limit_name = COALESCE($3, limit_name),\n                limit_type = COALESCE($4, limit_type),\n                limit_action = COALESCE($5, limit_action),\n                limit_per = COALESCE($6, limit_per),\n                limit_time = CASE WHEN $7::double precision IS NULL THEN limit_time ELSE make_interval(secs => $7) END,\n                limit_timeout_duration = CASE WHEN $8::double precision IS NULL THEN limit_timeout_duration ELSE make_interval(secs => $8) END\n            WHERE guild_id = $1\n            AND limit_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0f93754d5860f3382caf28355bb229e7bc420bed2e5299a54989342fd6c13a57"
+}

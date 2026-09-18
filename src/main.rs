@@ -1,8 +1,10 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{error, info};
+use once_cell::sync::OnceCell;
 use poise::serenity_prelude::{FullEvent, RoleAction, UserId};
-use serenity::model::guild::audit_log::{Action, ChannelAction, MemberAction};
+use serenity::model::guild::audit_log::{Action, ChannelAction, EmojiAction, MemberAction, WebhookAction};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
@@ -25,6 +27,14 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 pub struct Data {
     pool: sqlx::PgPool,
 }
+
+/// Set once the first shard becomes ready; used by the API server and the
+/// status-rotation task to report/act on every shard, not just shard 0.
+pub static SHARD_MANAGER: OnceCell<Arc<serenity::all::ShardManager>> = OnceCell::new();
+
+/// Ensures the global command registration, API server, and background tasks
+/// are only started once, regardless of how many shards fire `Ready` (or reconnect).
+static READY_INIT: AtomicBool = AtomicBool::new(false);
 
 #[poise::command(prefix_command)]
 async fn register(ctx: Context<'_>) -> Result<(), Error> {
@@ -86,9 +96,17 @@ async fn event_listener<'a>(
         FullEvent::Ready {
             data_about_bot,
         } => {
-            let user_data = ctx.serenity_context.data::<Data>();
+            info!("{} is ready! (shard {})", data_about_bot.user.name, ctx.serenity_context.shard_id);
 
-            info!("{} is ready!", data_about_bot.user.name);
+            // The shard manager is shared across every shard, so only the first
+            // `Ready` needs to record it; later shards' `set` calls are ignored.
+            let _ = SHARD_MANAGER.set(ctx.shard_manager.clone());
+
+            if READY_INIT.swap(true, Ordering::SeqCst) {
+                return Ok(());
+            }
+
+            let user_data = ctx.serenity_context.data::<Data>();
 
             if let Err(error) = poise::builtins::register_globally(
                 &ctx.serenity_context.http,
@@ -97,18 +115,6 @@ async fn event_listener<'a>(
             .await
             {
                 error!("Could not register global application commands: {error}");
-            }
-
-            for guild_id in ctx.serenity_context.cache.guilds() {
-                if let Err(error) = poise::builtins::register_in_guild(
-                    &ctx.serenity_context.http,
-                    &ctx.options().commands,
-                    guild_id,
-                )
-                .await
-                {
-                    error!("Could not register application commands in guild {guild_id}: {error}");
-                }
             }
 
             let cache_http_server = botox::cache::CacheHttpImpl::from_ctx(ctx.serenity_context);
@@ -224,6 +230,46 @@ async fn event_listener<'a>(
                         _ => Ok(()),
                     }
                 }
+                Action::Webhook(wa) => {
+                    let w_id = entry.target_id.ok_or("No webhook ID found")?;
+
+                    let limit_type = match wa {
+                        WebhookAction::Create => core::UserLimitTypes::WebhookAdd,
+                        WebhookAction::Delete => core::UserLimitTypes::WebhookRemove,
+                        _ => return Ok(()),
+                    };
+
+                    info!("Webhook {:?}: {}", wa, w_id);
+                    handler::handle_mod_action(
+                        *guild_id,
+                        entry.user_id,
+                        &user_data.pool,
+                        ctx.serenity_context,
+                        limit_type,
+                        w_id.to_string(),
+                    )
+                    .await
+                }
+                Action::Emoji(ea) => {
+                    let e_id = entry.target_id.ok_or("No emoji ID found")?;
+
+                    let limit_type = match ea {
+                        EmojiAction::Create => core::UserLimitTypes::EmojiAdd,
+                        EmojiAction::Delete => core::UserLimitTypes::EmojiRemove,
+                        _ => return Ok(()),
+                    };
+
+                    info!("Emoji {:?}: {}", ea, e_id);
+                    handler::handle_mod_action(
+                        *guild_id,
+                        entry.user_id,
+                        &user_data.pool,
+                        ctx.serenity_context,
+                        limit_type,
+                        e_id.to_string(),
+                    )
+                    .await
+                }
                 Action::Member(member_action) => {
                     let target_id = entry.target_id.ok_or("No member ID found")?;
                     let (limit_type, label) = match member_action {
@@ -261,6 +307,9 @@ async fn event_listener<'a>(
 #[tokio::main]
 async fn main() {
     const MAX_CONNECTIONS: u32 = 3; // max connections to the database, we don't need too many here
+
+    // Force this to initialize immediately so uptime is measured from process start.
+    once_cell::sync::Lazy::force(&stats::START_TIME);
 
     std::env::set_var("RUST_LOG", "skynet=info");
 
@@ -318,6 +367,7 @@ async fn main() {
                 cmds::settings(),
                 cmds::limits(),
                 cmds::actions(),
+                cmds::whitelist(),
                 owner::guild(),
             ],
             command_check: Some(|ctx| {
@@ -396,7 +446,7 @@ async fn main() {
         .await
         .expect("Error creating client");
 
-    if let Err(why) = client.start().await {
+    if let Err(why) = client.start_autosharded().await {
         error!("Client error: {:?}", why);
     }
 }

@@ -1,7 +1,12 @@
+use once_cell::sync::Lazy;
 use poise::{serenity_prelude::CreateEmbed, CreateReply};
+use std::time::Instant;
 
 type Error = crate::Error;
 type Context<'a> = crate::Context<'a>;
+
+/// Marks when the process started, used to report uptime via the API.
+pub static START_TIME: Lazy<Instant> = Lazy::new(Instant::now);
 
 // Various statistics
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

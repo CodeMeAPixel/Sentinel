@@ -12,6 +12,18 @@ pub async fn handle_mod_action(
     action: core::UserLimitTypes,
     action_target: String,
 ) -> Result<(), Error> {
+    // Skip whitelisted users/roles entirely: their actions are never recorded,
+    // so they can neither contribute to nor trigger a limit.
+    let member_roles = guild_id
+        .member(&ctx, user_id)
+        .await
+        .map(|member| member.roles.clone())
+        .unwrap_or_default();
+
+    if core::is_whitelisted(pool, guild_id, user_id, &member_roles).await? {
+        return Ok(());
+    }
+
     // SAFETY: Tx should be dropped if error occurs, so make a scope to seperate tx queries
     {
         let mut tx = pool.begin().await?;
@@ -91,6 +103,30 @@ pub async fn handle_mod_action(
                     core::UserLimitActions::BanUser => {
                         if let Err(e) = guild_id.ban(&ctx.http, user_id, 0, Some("Configured limit has been hit")).await {
                             error!("Failed to kick user: {}", e);
+                        }
+                    }
+                    core::UserLimitActions::TimeoutUser => {
+                        let duration_secs = hit_limit
+                            .limit
+                            .limit_timeout_duration
+                            .as_ref()
+                            .map(crate::utils::pg_interval_seconds)
+                            .unwrap_or(3600);
+
+                        let until = sqlx::types::chrono::Utc::now().timestamp() + duration_secs;
+
+                        match poise::serenity_prelude::Timestamp::from_unix_timestamp(until) {
+                            Ok(timestamp) => {
+                                if let Ok(mut member) = guild_id.member(&ctx, user_id).await {
+                                    if let Err(e) = member
+                                        .disable_communication_until(&ctx.http, timestamp)
+                                        .await
+                                    {
+                                        error!("Failed to timeout user: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => error!("Failed to build timeout timestamp: {}", e),
                         }
                     }
                 }

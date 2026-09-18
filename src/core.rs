@@ -29,6 +29,14 @@ pub enum UserLimitTypesChoices {
     Ban,
     #[name = "Unban"]
     Unban,
+    #[name = "Webhook Create"]
+    WebhookAdd,
+    #[name = "Webhook Remove"]
+    WebhookRemove,
+    #[name = "Emoji Create"]
+    EmojiAdd,
+    #[name = "Emoji Remove"]
+    EmojiRemove,
 }
 
 impl UserLimitTypesChoices {
@@ -43,6 +51,10 @@ impl UserLimitTypesChoices {
             Self::Kick => UserLimitTypes::Kick,
             Self::Ban => UserLimitTypes::Ban,
             Self::Unban => UserLimitTypes::Unban,
+            Self::WebhookAdd => UserLimitTypes::WebhookAdd,
+            Self::WebhookRemove => UserLimitTypes::WebhookRemove,
+            Self::EmojiAdd => UserLimitTypes::EmojiAdd,
+            Self::EmojiRemove => UserLimitTypes::EmojiRemove,
         }
     }
 }
@@ -59,6 +71,10 @@ pub enum UserLimitTypes {
     Kick,
     Ban,
     Unban,
+    WebhookAdd,
+    WebhookRemove,
+    EmojiAdd,
+    EmojiRemove,
 }
 
 impl UserLimitTypes {
@@ -73,6 +89,10 @@ impl UserLimitTypes {
             Self::Kick => "Kicks".to_string(),
             Self::Ban => "Bans".to_string(),
             Self::Unban => "Unbans".to_string(),
+            Self::WebhookAdd => "Webhooks Created".to_string(),
+            Self::WebhookRemove => "Webhooks Removed".to_string(),
+            Self::EmojiAdd => "Emoji Created".to_string(),
+            Self::EmojiRemove => "Emoji Removed".to_string(),
         }
     }
 }
@@ -85,6 +105,8 @@ pub enum UserLimitActionsChoices {
     KickUser,
     #[name = "Ban User"]
     BanUser,
+    #[name = "Timeout User"]
+    TimeoutUser,
 }
 
 impl UserLimitActionsChoices {
@@ -93,6 +115,7 @@ impl UserLimitActionsChoices {
             Self::RemoveAllRoles => UserLimitActions::RemoveAllRoles,
             Self::KickUser => UserLimitActions::KickUser,
             Self::BanUser => UserLimitActions::BanUser,
+            Self::TimeoutUser => UserLimitActions::TimeoutUser,
         }
     }
 }
@@ -103,6 +126,7 @@ pub enum UserLimitActions {
     RemoveAllRoles,
     KickUser,
     BanUser,
+    TimeoutUser,
 }
 
 impl UserLimitActions {
@@ -111,6 +135,7 @@ impl UserLimitActions {
             Self::RemoveAllRoles => "Remove All Roles".to_string(),
             Self::KickUser => "Kick User".to_string(),
             Self::BanUser => "Ban User".to_string(),
+            Self::TimeoutUser => "Timeout User".to_string(),
         }
     }
 }
@@ -237,13 +262,14 @@ pub struct Limit {
     pub limit_action: UserLimitActions,
     pub limit_per: i32,
     pub limit_time: PgInterval,
+    pub limit_timeout_duration: Option<PgInterval>,
 }
 
 impl Limit {
     pub async fn from_guild(pool: &PgPool, guild_id: GuildId) -> Result<Vec<Self>, Error> {
         let rec = sqlx::query!(
             "
-                SELECT limit_id, limit_name, limit_type, limit_action, limit_per, limit_time
+                SELECT limit_id, limit_name, limit_type, limit_action, limit_per, limit_time, limit_timeout_duration
                 FROM limits
                 WHERE guild_id = $1
             ",
@@ -263,11 +289,38 @@ impl Limit {
                 limit_action: r.limit_action.parse()?,
                 limit_per: r.limit_per,
                 limit_time: r.limit_time,
+                limit_timeout_duration: r.limit_timeout_duration,
             });
         }
 
         Ok(limits)
     }
+}
+
+/// Returns whether a user (directly, or via one of their roles) is whitelisted
+/// from limit tracking in a guild.
+pub async fn is_whitelisted(
+    pool: &PgPool,
+    guild_id: GuildId,
+    user_id: UserId,
+    role_ids: &[poise::serenity_prelude::RoleId],
+) -> Result<bool, Error> {
+    let mut entity_ids: Vec<String> = vec![user_id.to_string()];
+    entity_ids.extend(role_ids.iter().map(|r| r.to_string()));
+
+    let count = sqlx::query!(
+        "
+            SELECT COUNT(*) FROM guild_whitelist
+            WHERE guild_id = $1
+            AND entity_id = ANY($2)
+        ",
+        guild_id.to_string(),
+        &entity_ids
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count.count.unwrap_or_default() > 0)
 }
 
 #[derive(Debug)]

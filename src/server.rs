@@ -28,6 +28,8 @@ pub async fn setup_server(pool: PgPool, cache_http: CacheHttpImpl) {
 
     let app = Router::new()
         .route("/api/stats", get(stats))
+        .route("/api/health", get(health))
+        .route("/api/shards", get(shards))
         .route("/api/commands", get(commands))
         .route("/:gid", get(create_login))
         .route("/confirm-login", get(confirm_login))
@@ -53,7 +55,12 @@ pub async fn setup_server(pool: PgPool, cache_http: CacheHttpImpl) {
     }
 }
 
-async fn stats() -> Json<serde_json::Value> {
+async fn stats(State(app_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let shard_count = match crate::SHARD_MANAGER.get() {
+        Some(manager) => manager.runners.lock().await.len(),
+        None => 0,
+    };
+
     Json(json!({
         "status": "online",
         "name": "Sentinel",
@@ -62,6 +69,47 @@ async fn stats() -> Json<serde_json::Value> {
         "commit": crate::stats::GIT_SHA,
         "semver": crate::stats::GIT_SEMVER,
         "capabilities": ["audit monitoring", "thresholds", "automatic response", "owner alerts"],
+        "guild_count": app_state.cache_http.cache.guild_count(),
+        "shard_count": shard_count,
+        "uptime_seconds": crate::stats::START_TIME.elapsed().as_secs(),
+    }))
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({ "status": "ok" }))
+}
+
+async fn shards(State(app_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let Some(shard_manager) = crate::SHARD_MANAGER.get() else {
+        return Json(json!({ "shard_count": 0, "shards": [] }));
+    };
+
+    let runners = shard_manager.runners.lock().await;
+    let total_shards = std::num::NonZeroU16::new(runners.len() as u16)
+        .unwrap_or(std::num::NonZeroU16::new(1).expect("1 is non-zero"));
+
+    let mut guild_counts = std::collections::HashMap::new();
+    for guild_id in app_state.cache_http.cache.guilds() {
+        *guild_counts.entry(guild_id.shard_id(total_shards)).or_insert(0u32) += 1;
+    }
+
+    let mut shards: Vec<serde_json::Value> = runners
+        .iter()
+        .map(|(shard_id, info)| {
+            json!({
+                "id": shard_id.0,
+                "status": format!("{:?}", info.stage),
+                "latency_ms": info.latency.map(|d| d.as_millis()),
+                "guild_count": guild_counts.get(&shard_id.0).copied().unwrap_or(0),
+            })
+        })
+        .collect();
+
+    shards.sort_by_key(|shard| shard["id"].as_u64().unwrap_or(0));
+
+    Json(json!({
+        "shard_count": runners.len(),
+        "shards": shards,
     }))
 }
 
@@ -77,11 +125,15 @@ async fn commands() -> Json<serde_json::Value> {
             { "name": "settings", "group": "Server", "description": "Configure audit notification channel and color." },
             { "name": "limits guide", "group": "Protection", "description": "Understand thresholds, windows, and responses." },
             { "name": "limits add", "group": "Protection", "description": "Create a threshold for a moderation event." },
+            { "name": "limits edit", "group": "Protection", "description": "Update an existing protection threshold." },
             { "name": "limits view", "group": "Protection", "description": "Review active protection thresholds." },
             { "name": "limits hit", "group": "Protection", "description": "Review triggered thresholds." },
             { "name": "limits remove", "group": "Protection", "description": "Remove a configured threshold." },
             { "name": "actions view", "group": "Audit", "description": "Review recorded moderation actions." },
-            { "name": "perms", "group": "Administration", "description": "Manage Sentinel administrators." }
+            { "name": "perms", "group": "Administration", "description": "Manage Sentinel administrators." },
+            { "name": "whitelist add", "group": "Administration", "description": "Exempt a trusted user or role from limit tracking." },
+            { "name": "whitelist remove", "group": "Administration", "description": "Remove a user or role from the whitelist." },
+            { "name": "whitelist view", "group": "Administration", "description": "Review whitelisted users and roles." }
         ]
     }))
 }
@@ -99,7 +151,6 @@ impl IntoResponse for ServerError {
 }
 
 async fn create_login(Path(gid): Path<UserId>) -> Redirect {
-    // Redirect user to the login page
     let url = format!("https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}/confirm-login&scope={}&state={}&response_type=code", crate::config::CONFIG.client_id, crate::config::CONFIG.frontend_url, "identify", gid);
 
     Redirect::temporary(&url)
@@ -120,7 +171,6 @@ async fn confirm_login(
     State(app_state): State<Arc<AppState>>,
     data: Query<ConfirmLogin>,
 ) -> Result<([(HeaderName, &'static str); 2], String), ServerError> {
-    // Create access token from code
     let client = reqwest::Client::new();
 
     let access_token = client
@@ -143,7 +193,6 @@ async fn confirm_login(
         .await
         .map_err(|_| ServerError::Error("Could not deserialize response".to_string()))?;
 
-    // Get user from access token
     let user = client
         .get("https://discord.com/api/v10/users/@me")
         .header(
@@ -161,7 +210,6 @@ async fn confirm_login(
         .await
         .map_err(|_| ServerError::Error("Could not deserialize response".to_string()))?;
 
-    // Check that user is a guild admin
     crate::utils::is_guild_admin(
         &app_state.cache_http,
         &app_state.pool,
@@ -171,12 +219,10 @@ async fn confirm_login(
     .await
     .map_err(|e| ServerError::Error(e.to_string()))?;
 
-    // Find all actions
     let actions = crate::core::Action::guild(&app_state.pool, data.state)
         .await
         .map_err(|e| ServerError::Error(e.to_string()))?;
 
-    // Convert to json
     let actions = serde_json::to_string(&actions)
         .map_err(|_| ServerError::Error("Could not serialize actions".to_string()))?;
 

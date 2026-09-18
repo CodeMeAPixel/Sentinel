@@ -1,9 +1,12 @@
 use poise::serenity_prelude::GuildId;
 use sqlx::postgres::types::PgInterval;
 
+pub fn pg_interval_seconds(i: &PgInterval) -> i64 {
+    i.microseconds / 1000000 + ((i.days * 86400) as i64) + ((i.months * 2628000) as i64)
+}
+
 pub fn parse_pg_interval(i: PgInterval) -> String {
-    let seconds =
-        i.microseconds / 1000000 + ((i.days * 86400) as i64) + ((i.months * 2628000) as i64);
+    let seconds = pg_interval_seconds(&i);
 
     let dur = std::time::Duration::from_secs(seconds.try_into().unwrap_or_default());
 
