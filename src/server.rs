@@ -6,6 +6,7 @@ use axum::{
     http::{HeaderName, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::get,
+    Json,
     Router,
 };
 use log::info;
@@ -26,6 +27,8 @@ pub async fn setup_server(pool: PgPool, cache_http: CacheHttpImpl) {
     let shared_state = Arc::new(AppState { pool, cache_http });
 
     let app = Router::new()
+        .route("/api/stats", get(stats))
+        .route("/api/commands", get(commands))
         .route("/:gid", get(create_login))
         .route("/confirm-login", get(confirm_login))
         .with_state(shared_state)
@@ -36,7 +39,9 @@ pub async fn setup_server(pool: PgPool, cache_http: CacheHttpImpl) {
                 .allow_headers(Any),
         );
 
-    let addr = "127.0.0.1:4950".parse().expect("Invalid server address");
+    let bind_addr = std::env::var("API_BIND_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:4950".to_string());
+    let addr = bind_addr.parse().expect("Invalid API_BIND_ADDR");
 
     info!("Starting server on {}", addr);
 
@@ -46,6 +51,39 @@ pub async fn setup_server(pool: PgPool, cache_http: CacheHttpImpl) {
     {
         panic!("server error: {}", e);
     }
+}
+
+async fn stats() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "online",
+        "name": "Sentinel",
+        "service": "discord-moderation-safety",
+        "version": crate::stats::VERSION,
+        "commit": crate::stats::GIT_SHA,
+        "semver": crate::stats::GIT_SEMVER,
+        "capabilities": ["audit monitoring", "thresholds", "automatic response", "owner alerts"],
+    }))
+}
+
+async fn commands() -> Json<serde_json::Value> {
+    Json(json!({
+        "name": "Sentinel",
+        "commands": [
+            { "name": "help", "group": "Essentials", "description": "Browse Sentinel commands and usage." },
+            { "name": "simplehelp", "group": "Essentials", "description": "Get a compact command reference." },
+            { "name": "ping", "group": "Essentials", "description": "Check whether Sentinel is responding." },
+            { "name": "stats", "group": "Essentials", "description": "View Sentinel build and runtime details." },
+            { "name": "setup", "group": "Server", "description": "Initialize Sentinel protection for a server." },
+            { "name": "settings", "group": "Server", "description": "Configure audit notification channel and color." },
+            { "name": "limits guide", "group": "Protection", "description": "Understand thresholds, windows, and responses." },
+            { "name": "limits add", "group": "Protection", "description": "Create a threshold for a moderation event." },
+            { "name": "limits view", "group": "Protection", "description": "Review active protection thresholds." },
+            { "name": "limits hit", "group": "Protection", "description": "Review triggered thresholds." },
+            { "name": "limits remove", "group": "Protection", "description": "Remove a configured threshold." },
+            { "name": "actions view", "group": "Audit", "description": "Review recorded moderation actions." },
+            { "name": "perms", "group": "Administration", "description": "Manage Sentinel administrators." }
+        ]
+    }))
 }
 
 enum ServerError {

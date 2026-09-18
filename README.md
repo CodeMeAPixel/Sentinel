@@ -72,6 +72,7 @@ Optional variables:
 ```text
 FRONTEND_URL=https://your-frontend.example
 PROXY_URL=https://your-proxy.example
+API_BIND_ADDR=127.0.0.1:4950
 ```
 
 `TOKEN`, `CLIENT_ID`, and `CLIENT_SECRET` are also accepted as compatibility aliases. `PROXY_URL` can be omitted.
@@ -116,6 +117,13 @@ Do not copy `.env` into the image or commit it to the repository.
 Create a service from this repository and provide the required environment variables in the service settings. Dokploy can build the included Dockerfile. Railpack can use [railpack.json](railpack.json), but the Dockerfile is the preferred path when you need the repository metadata and native build packages to be explicit.
 
 The application listens for the OAuth web server when the bot becomes ready. Make sure the configured `FRONTEND_URL` and any reverse-proxy or public routing settings match the deployment.
+
+The same server exposes public read-only endpoints for the website:
+
+- `GET /api/stats` returns availability, release, and capability metadata.
+- `GET /api/commands` returns the public command catalog used by the website.
+
+Set `API_BIND_ADDR` to the address required by your deployment. The web frontend can proxy these endpoints by setting `BOT_API_URL` to the bot's base URL.
 
 ## Project identity
 
